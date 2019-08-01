@@ -12,6 +12,8 @@ from ortools.linear_solver import pywraplp
 import ortools
 import pandas as pd
 import matplotlib.pyplot as plt
+from copy import deepcopy
+
 
 
 param = {}
@@ -35,13 +37,14 @@ def seg_estimate(info):
     return metrics
 
 
-def solver(budget):
 
+def solver(budget):
+    
     # Create the linear solver with the GLOP backend.
     solver = pywraplp.Solver('segmentation',
                              pywraplp.Solver.GLOP_LINEAR_PROGRAMMING)
-
-
+    
+    
     # define variables
     
     variables = {}
@@ -49,9 +52,9 @@ def solver(budget):
         variables[k] = solver.NumVar(param['min_frac'],
                                                  param['max_frac'],
                                                  sg['segment'])
-        
+    
     print('Number of variables =', solver.NumVariables())
-
+    
     # define constraints
     
     c_budget = solver.Constraint(0,   budget , 'budget')
@@ -61,48 +64,62 @@ def solver(budget):
         delta_ni  = metrics[k]['delta_ni']
         c_budget.SetCoefficient(variables[k], -delta_ni)
         c_applied.SetCoefficient(variables[k], applied)
-
+    
     print('Number of constraints =', solver.NumConstraints())
-
+    
     # Create the objective function, 3 * x + y.
     objective = solver.Objective()
     for k,sg in info.items():
         fare_lift = metrics[k]['fare_lift']
         objective.SetCoefficient(variables[k],fare_lift )
     objective.SetMaximization()
-
-    # [START solve]
-    solver.Solve()
-    # [END solve]
-
-    # [START print_solution]
-    print('Solution:')
-    print('fare_lift =', objective.Value())
-    opt_solution = {}
-    for k,x in variables.items():
-        print(metrics[k]['segment'], x.solution_value())
-        opt_solution[metrics[k]['segment']] = x.solution_value()
-    opt_solution['opt'] = objective.Value()
-    return opt_solution
-
-def metrics_evalution(solution):
     
+    f = solver.Solve()
+    if f == 0:
+        print('Solution:')
+        print('fare_lift =', objective.Value())
+        opt_solution = {}
+        for k,x in variables.items():
+            #print(metrics[k]['segment'], x.solution_value())
+            opt_solution[k] = {'segment' : metrics[k]['segment'],
+                            'fraction': x.solution_value()}
+        return opt_solution,objective.Value()
 
 
-if __name__ == '__main__':
-    metrics = seg_estimate(info)
-    segment_list = list(pd.DataFrame(info).T['segment'])
-    B = np.arange(1000,50000,1000)
+def metrics_evalution(opt_solution, metrics,b):
     result = []
+    opt_fraction = {}
+    for k, sg in metrics.items():
+        temp  = dict()
+        temp['budget'] = b
+        temp['applied'] = opt_solution[k]['fraction']*metrics[k]['applied']
+        temp['delta_ni'] = opt_solution[k]['fraction']*metrics[k]['delta_ni']
+        temp['fare_lift'] = opt_solution[k]['fraction']*metrics[k]['fare_lift']
+        temp['spend'] = opt_solution[k]['fraction']*metrics[k]['spend']
+        result.append(temp)
+        opt_fraction[opt_solution[k]['segment']]=opt_solution[k]['fraction']
+    return dict(pd.DataFrame(result).agg(sum)),opt_fraction
+
+def different_budget():
+    B = np.arange(1000,50000,1000)
+    summary_metric = []
+    opt_fraction = []
     for b in B:
-        result.append(solver(b))
-    pd.DataFrame(result)[segment_list].plot()
-        
-    fare = [solver(b) for b in B]
-    plt.plot(B,fare)
-    mm = pd.DataFrame(metrics).T
+        opt_solution , opt_value = solver(b)
+        me,fr = metrics_evalution(opt_solution, metrics,b)
+        opt_fraction.append(fr)
+        summary_metric.append(me)
+    pd.DataFrame(opt_fraction).plot()
+    return summary_metric
+
     
-    tmp = pd.concat((mm['segment'] ,mm['fare_lift']/mm['delta_ni']), axis=1)
-    
-    
-    
+if __name__ == '__main__':
+    B = np.arange(1000,50000,1000)
+    summary_metric
+    pd.DataFrame(opt_fraction).plot()
+    summary_metric = pd.DataFrame(summary_metric)    
+    summary_metric.plot.scatter(x='budget', y = 'fare_lift')
+    summary_metric.plot.scatter(x='budget', y = 'fare_lift')
+    summary_metric.plot.scatter(x='spend', y = 'fare_lift')
+    summary_metric.plot.scatter(x='budget', y = 'fare_lift')
+    summary_metric.plot.scatter(x='budget', y = 'spend')
